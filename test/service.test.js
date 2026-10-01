@@ -655,6 +655,105 @@ test('startProxy：端口被占（EADDRINUSE）时自动尝试下一个端口', 
   await service.dispose();
 });
 
+test('startProxy：端口被系统保留（EACCES）时也换端口重试', async () => {
+  let attempts = 0;
+  const internals = {
+    ...stubInternals(),
+    createProxy: async ({ port: p }) => {
+      attempts += 1;
+      if (attempts === 1) {
+        const e = new Error('listen EACCES: permission denied 0.0.0.0:3081');
+        e.code = 'EACCES';
+        throw e;
+      }
+      return { port: p, close: async () => {} };
+    },
+  };
+  const service = createPocketService({ dshPort: 3080, port: 3081, internals });
+  const proxy = await service.startProxy();
+  assert.equal(attempts, 2, '保留端口后立即重试');
+  assert.equal(proxy.port, 3082, '自动换到下一个端口');
+  await service.dispose();
+});
+
+test('startProxy：Windows 保留端口段内整段 EACCES 时能跨出该段', async () => {
+  // 复现真实环境：Windows 把 3048-3147 整段划成保留段（Hyper-V/WSL），段内绑定一律
+  // EACCES 且 netstat 看不到任何监听者；段外的 3148 可以正常绑定。
+  const reserved = new Set(Array.from({ length: 100 }, (_, i) => 3048 + i));
+  let attempts = 0;
+  const internals = {
+    ...stubInternals(),
+    createProxy: async ({ port: p }) => {
+      attempts += 1;
+      if (reserved.has(p)) {
+        const e = new Error(`listen EACCES: permission denied 0.0.0.0:${p}`);
+        e.code = 'EACCES';
+        throw e;
+      }
+      return { port: p, close: async () => {} };
+    },
+  };
+  const service = createPocketService({ dshPort: 3080, port: 3081, internals });
+  const proxy = await service.startProxy();
+  assert.equal(proxy.port, 3148, '停在保留段外的第一个可用端口');
+  assert.equal(attempts, 68, '3081..3148 逐个尝试（旧实现只试 10 个，逃不出 100 宽的保留段）');
+  const st = await service.status();
+  assert.ok(st.lanUrl.includes(':3148'), 'URL 使用实际端口');
+  await service.dispose();
+});
+
+test('startProxy：整个扫描窗口都不可用时回退到系统分配的端口', async () => {
+  const internals = {
+    ...stubInternals(),
+    createProxy: async ({ port: p }) => {
+      if (p === 0) return { port: 49152, close: async () => {} }; // port 0 = 内核挑空闲端口
+      const e = new Error(`listen EACCES: permission denied 0.0.0.0:${p}`);
+      e.code = 'EACCES';
+      throw e;
+    },
+  };
+  const service = createPocketService({ dshPort: 3080, port: 3081, internals });
+  const proxy = await service.startProxy();
+  assert.equal(proxy.port, 49152, '回退到内核分配的端口');
+  const st = await service.status();
+  assert.ok(st.lanUrl.includes(':49152'), 'URL 使用系统分配的端口');
+  await service.dispose();
+});
+
+test('startProxy：始终绑不上时报错给出 Windows 保留端口段的排查方法', async () => {
+  const internals = {
+    ...stubInternals(),
+    createProxy: async ({ port: p }) => {
+      const e = new Error(`listen EACCES: permission denied 0.0.0.0:${p}`);
+      e.code = 'EACCES';
+      throw e;
+    },
+  };
+  const service = createPocketService({ dshPort: 3080, port: 3081, internals });
+  await assert.rejects(service.startProxy(), (err) => {
+    assert.match(err.message, /excludedportrange/, '给出可直接照做的排查命令');
+    assert.match(err.message, /listen EACCES/, '保留原始错误');
+    assert.equal(err.message.split(' | ').length, 2, '保持「中文 | English」两半，客户端按界面语言取一半');
+    return true;
+  });
+});
+
+test('startProxy：非端口问题的错误不重试，直接抛出', async () => {
+  let attempts = 0;
+  const internals = {
+    ...stubInternals(),
+    createProxy: async () => {
+      attempts += 1;
+      const e = new Error('隧道配置错误');
+      e.code = 'EINVAL';
+      throw e;
+    },
+  };
+  const service = createPocketService({ dshPort: 3080, port: 3081, internals });
+  await assert.rejects(service.startProxy(), /隧道配置错误/);
+  assert.equal(attempts, 1, '只试一次');
+});
+
 test('公网隧道自动恢复：开启时持久化标记，重启后 restoreTunnelIfNeeded 自动拉起（issue #11）', async () => {
   const fsp = await import('node:fs/promises');
   const os = await import('node:os');

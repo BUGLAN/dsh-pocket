@@ -358,6 +358,12 @@ function PocketSettingsTab({ rpcCall, t }) {
     if (i < 0) return s;
     return (t('ok') === POCKET_ZH.ok ? s.slice(0, i) : s.slice(i + 3)).trim();
   };
+  // 命名隧道的 Service 必须指向**实际**代理端口：端口可被 settings.proxyPort 改，
+  // 也可能因被占/被系统保留（Windows 保留端口段）而顺延（见 lib/service.mjs startProxy）。
+  // 写死默认端口会让用户把隧道指向没人监听的端口，公网直接 502。
+  const namedHowText = fmt(t, 'namedHow', {
+    url: status?.proxyPort ? `http://127.0.0.1:${status.proxyPort}` : t('namedHowPort'),
+  });
   // 轻量 Toast：操作成功/失败后短暂提示（自动消失，不打断操作）
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
@@ -392,17 +398,9 @@ function PocketSettingsTab({ rpcCall, t }) {
   const [advOpen, setAdvOpen] = useState(false);
 
   return h('div', { style: styles.card },
-    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-      h('div', null,
-        h('strong', null, t('title')),
-        h('div', { style: styles.muted }, t('subtitle')),
-      ),
-      h('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary,#8b93a1)', textAlign: 'right' } },
-        h('div', { style: { whiteSpace: 'nowrap' } }, t('developer')),
-        h('div', { style: { whiteSpace: 'nowrap' } }, t('starAsk')),
-        h('a', { href: 'https://github.com/shaobeichen/dsh-pocket', target: '_blank', rel: 'noreferrer', style: { color: 'var(--dsw-alias-brand-primary,#4f6ef7)', fontSize: 12, lineHeight: 1.6, textDecoration: 'underline' } },
-          t('starCta')),
-      ),
+    h('div', null,
+      h('strong', null, t('title')),
+      h('div', { style: styles.muted }, t('subtitle')),
     ),
 
     // 桌面端不显示更新/重启横幅（更新由 DSH Desktop 管理），也不需要额外提示
@@ -523,7 +521,7 @@ function PocketSettingsTab({ rpcCall, t }) {
               namedMode && !tunnelCfg ? h('div', { style: { ...styles.muted } },
                 fmt(t, 'namedSummary', { host: tunnelModeView.hostname || '—', token: tunnelModeView.tokenSet ? t('namedTokenSet') : t('namedTokenMissing') }),
                 h('button', { style: { ...styles.btn, height: 26, padding: '0 10px', fontSize: 12, marginLeft: 8 }, onClick: () => setTunnelCfg({ hostname: tunnelModeView.hostname ?? '', token: '', err: null }) }, t('namedEdit')),
-                h('div', { style: { ...styles.muted, marginTop: 4 } }, t('namedHow')),
+                h('div', { style: { ...styles.muted, marginTop: 4 } }, namedHowText),
                 !tunnelModeView.tokenSet || !tunnelModeView.hostname ? h('div', { style: { marginTop: 2, color: 'var(--dsw-alias-state-error-primary,#dc2626)' } }, t('namedNeedCfg')) : null,
               ) : null,
               // 固定域名：编辑表单（域名 + Tunnel Token，Token 留空保持不变）
@@ -553,7 +551,7 @@ function PocketSettingsTab({ rpcCall, t }) {
                   h('button', { style: { ...styles.btn, height: 26, padding: '0 10px', fontSize: 12 }, onClick: saveNamedTunnel }, t('save')),
                   h('button', { style: { ...styles.btn, height: 26, padding: '0 10px', fontSize: 12 }, onClick: () => setTunnelCfg(null) }, t('cancel')),
                 ),
-                h('div', { style: { ...styles.muted, marginTop: 6 } }, t('namedHow')),
+                h('div', { style: { ...styles.muted, marginTop: 6 } }, namedHowText),
                 h('div', { style: { marginTop: 2, fontSize: 11, color: 'var(--dsw-alias-state-warn-primary,#b45309)', lineHeight: 1.5 } }, t('namedSecurity')),
                 tunnelCfg.err ? h('div', { style: { color: 'var(--dsw-alias-state-error-primary,#dc2626)', marginTop: 4 } }, errText(tunnelCfg.err)) : null,
               ) : null,

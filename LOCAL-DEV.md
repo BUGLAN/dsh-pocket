@@ -105,3 +105,5 @@ ls -l ~/.dsh/profiles/web/node_modules/dsh-pocket
 **代理端口 3081 起不来**：插件没加载成功。检查软链路径是否正确、仓库依赖是否装好；也可以 `curl -s http://127.0.0.1:3080/` 看返回的 HTML 里有没有 `dsh-pocket/client.js`。
 
 **端口被占**：`lsof -ti :3080` 或 `lsof -ti :3081` 查占用进程；dsh-pocket 的代理在 3081 被占时会自动顺延到下一个端口。
+
+**`listen EACCES`**：不是被占用，而是 Windows 把整段端口保留了（Hyper-V/WSL）。`netsh interface ipv4 show excludedportrange protocol=tcp` 看保留段，插件会自动换端口跨出去；想固定端口就在 `$DSH_HOME/dsh-pocket/settings.json` 写段外的 `"proxyPort"`。见 README 常见问题。

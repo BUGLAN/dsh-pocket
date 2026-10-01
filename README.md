@@ -104,9 +104,10 @@ npx @deepseek-ai/dsh web
 默认「快速隧道」的公网地址每次重启都会变（前缀随机）。想要**固定公网地址**，可用 Cloudflare **命名隧道**（需要 Cloudflare 账号 + 自己的域名）：
 
 1. 在 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → **Networks → Tunnels** 创建一条 Tunnel，复制 **Tunnel Token**
-2. 在该 Tunnel 的 **Public Hostname** 里把你的域名（如 `pocket.example.com`）的 Service 指向 `http://127.0.0.1:3081`
-3. 回到设置页公网区块：模式切到「**命名隧道**」，粘贴 Tunnel Token、填写固定域名，保存
-4. 点「开启公网访问」→ 公网地址固定为你的域名，**重启不再变化**
+2. 确保域名已**接入 Cloudflare**（添加站点，并在域名注册商处把 NS 改成 Cloudflare 的 NS）：面板的「域」下拉只列出本账号下托管的站点，没接入就是空的
+3. 在该 Tunnel 的 **Public Hostname** 里把域名（如 `pocket.example.com`）的 Service 指向**本机代理端口**（形如 `http://127.0.0.1:<代理端口>`；默认 3081，改过 `proxyPort` 或因端口不可用顺延后，以设置页「局域网访问」显示的**实际端口**为准）。DNS 记录由 Cloudflare 自动创建（CNAME → `<隧道UUID>.cfargotunnel.com`，橙云 Proxied）；没自动建就在 **DNS → 记录** 手动加一条同样的 CNAME
+4. 回到设置页公网区块：模式切到「**命名隧道**」，粘贴 Tunnel Token、填写固定域名，保存
+5. 点「开启公网访问」→ 公网地址固定为你的域名，**重启不再变化**
 
 注意：命名隧道模式下公网密码**不自动轮换**（地址固定，重启后密码不变），建议配合「自定义密码」主动管理；Tunnel Token 只存本机（`$DSH_HOME/dsh-pocket/settings.json`，仅本机可读），设置页不回显。
 
@@ -135,8 +136,9 @@ npx @deepseek-ai/dsh web
 | `dsh: command not found` / 提示 DSH 未定义  | dsh CLI 没装：`npm install -g @deepseek-ai/dsh`，或命令前加 `npx @deepseek-ai/dsh`                                                                                                                                                                                                                                                                      |
 | `ERR_PNPM_ADDING_TO_ROOT`                   | pnpm 9 对 workspace 根的限制：安装/更新命令**末尾加 `-w`**（`--workspace-root`）                                                                                                                                                                                                                                                                        |
 | 装完/更新了但界面没变化                     | **必须重启 `dsh web`** 才生效；运行中的进程仍加载旧代码                                                                                                                                                                                                                                                                                                 |
+| `listen EACCES ... :3081`                   | Windows 把整段端口保留（Hyper-V/WSL 常见）：`netsh interface ipv4 show excludedportrange protocol=tcp` 列出的段内**任何进程**都绑不上，`netstat` 里看不到监听者——不是被占用。插件会自动换端口（跨出保留段；整段都不可用时回退到系统分配的端口）；想固定端口就在 `$DSH_HOME/dsh-pocket/settings.json` 写一个段外的 `"proxyPort"` 后重启 `dsh web` |
 | `listen EADDRINUSE ... :3081`               | 旧 dsh-pocket 进程还占着端口：macOS/Linux `lsof -ti :3081 \| xargs kill -9`；Windows `netstat -ano \| findstr :3081`（找 LISTENING 的 PID）→ `taskkill /PID <PID> /F`，后重试                                                                                                                                                                           |
-| 想换端口（issue #70）                       | 插件模式：在 `$DSH_HOME/dsh-pocket/settings.json` 写 `"proxyPort": 3082` 后重启 `dsh web`。CLI 模式：`dsh-pocket --port 3082`。端口被占会报 `EADDRINUSE`，杀掉旧进程或换一个端口                                                                                                                                                                        |
+| 想换端口（issue #70）                       | 插件模式：在 `$DSH_HOME/dsh-pocket/settings.json` 写 `"proxyPort": 3082` 后重启 `dsh web`。CLI 模式：`dsh-pocket --port 3082`。端口被占（`EADDRINUSE`）或被系统保留（`EACCES`）时插件会自动顺延到下一个可用端口                                                                                                                                                                        |
 | 想给访客一个临时密码                        | 暂不支持：issue #69 的「临时访问 PIN」功能已在 2.6.x 移除（撤销时会崩）。现在分享访问：把主密码或 `?token=<主密码>` 链接发给对方，用完在设置页点「刷新」换掉即可                                                                                                                                                                                        |
 | Linux 服务器装不上 cloudflared（issue #45） | 远程 Linux 国内/企业网下所有 CDN 源（GitHub/ghproxy/gh.ddlc/gh-proxy）都连不上时：在服务器上手动装 `cloudflared`（如 `apt install cloudflared`、`dnf install cloudflared`、或下载 tgz 解压到任意目录），然后在 `$DSH_HOME/dsh-pocket/settings.json` 加 `"cloudflaredPath": "/path/to/cloudflared"`，重启 `dsh web` 后插件直接调用它，**不再走自动下载** |
 | 版本停在 0.x 升不上去                       | `^0.x` 范围不允许升到 1.x：更新用 `--latest`（`dsh plugin --profile web update dsh-pocket --latest -w`）                                                                                                                                                                                                                                                |
