@@ -3,3 +3,23 @@
 - insert:
     - id: dsh-pocket
       name: dsh-pocket
+
+# 放宽宿主 gateway 的 WebSocket 心跳窗口（issue #118）。
+#
+# 宿主 typertGateway 默认每 2s 发一次 Ping、累计 2 次没等到 Pong 就
+# terminate 连接（websocketHeartbeatIntervalMs=2000 + MAX_MISSED_HEARTBEATS=2，
+# 即 Pong 迟到 ~4-6s 连接就被杀）。这对 loopback 低延迟场景没问题，但
+# dsh-pocket 的手机/公网链路（WiFi 省电唤醒、蜂窝抖动、cloudflared 边缘
+# 延迟）Pong 迟到几秒很常见，结果就是手机端左下角一直「重新连接中」、
+# 几秒一断，页面基本不可用。放宽到 15s（容忍窗口 ~30-45s）。
+#
+# 真正的死链检测不受影响：本插件在透传 socket 上自带的 30s 心跳
+# （PR #41）负责发现 NAT/省电导致的静默断链并触发浏览器重连。
+#
+# 兼容性：websocketHeartbeatIntervalMs 自 dsh v0.1.2-alpha.2 引入；更老的
+# 版本没有这个心跳（也就没有此问题），此条目不匹配时只是 Loader 警告，
+# 不影响宿主启动。
+- id: typert-gateway
+  name: '@deepseek-ai/dsh-api-gateway'
+  config:
+    websocketHeartbeatIntervalMs: 15000
