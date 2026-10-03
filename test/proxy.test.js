@@ -422,6 +422,41 @@ test('压缩 HTML（gzip）不注入 polyfill——防止损坏压缩流', async
   }
 });
 
+test('issue #150：真实浏览器导航（Accept-Encoding: gzip）也能拿到注入后的 HTML', async () => {
+  // 真实浏览器导航必带 `Accept-Encoding: gzip, deflate, br`，尊重它的上游会回
+  // gzip → 注入分支（只认未压缩响应）被跳过 → polyfill / transport shim 对真实
+  // 浏览器从未生效（#53/#96 死代码）。修复：HTML 导航向上游要 `identity`。
+  const zlib = await import('node:zlib');
+  let seenAcceptEncoding = '(unset)';
+  const up = createServer((req, res) => {
+    seenAcceptEncoding = String(req.headers['accept-encoding'] ?? '');
+    if (/\bgzip\b/.test(seenAcceptEncoding)) {
+      // 模拟真实 dsh web：浏览器要 gzip 就给 gzip
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip' });
+      res.end(zlib.gzipSync('<!doctype html><head></head><body>gzipped-page</body>'));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end('<!doctype html><head></head><body>identity-page</body>');
+  });
+  await new Promise((r) => up.listen(0, '127.0.0.1', r));
+  const proxy = await createPocketProxy({ port: 0, host: '127.0.0.1', upstream: { host: '127.0.0.1', port: up.address().port } });
+  try {
+    const res = await fetch(`http://127.0.0.1:${proxy.port}/`, {
+      headers: { accept: 'text/html,application/xhtml+xml', 'accept-encoding': 'gzip, deflate, br' },
+    });
+    const html = await res.text();
+    assert.equal(seenAcceptEncoding, 'identity', 'HTML 导航向上游请求未压缩文档');
+    assert.equal(res.headers.get('content-encoding'), null, '响应未压缩');
+    assert.ok(html.includes('data-dsh-pocket-polyfill="1"'), 'polyfill 注入落地');
+    assert.ok(html.includes('randomUUID'), 'randomUUID polyfill 在响应里');
+    assert.ok(html.includes('identity-page'), '页面内容完整');
+  } finally {
+    await proxy.close();
+    await new Promise((r) => up.close(r));
+  }
+});
+
 test('活动 WS 连接存在时 close 不挂起（closeAllConnections）', async () => {
   const up = await fakeUpstream();
   const proxy = await createPocketProxy({ port: 0, host: '127.0.0.1', upstream: { host: '127.0.0.1', port: up.port } });
